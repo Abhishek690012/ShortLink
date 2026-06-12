@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: shortlink_db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: shortlink
+      POSTGRES_PASSWORD: shortlink_secret
+      POSTGRES_DB: shortlink_db
+    volumes:
+      # Persist data across container restarts
+      - shortlink_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U shortlink -d shortlink_db" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  shortlink_pgdata:
