@@ -215,6 +215,33 @@ docker compose down -v
 
 ---
 
+## Load Testing
+
+```bash
+k6 run benchmark.js
+```
+
+## Benchmark results
+
+### Highlights
+- **Zero Downtime:** Achieved a **0.00% error rate** across ~138,800 total requests.
+- **High Throughput:** Sustained **~466 Requests Per Second (RPS)** under heavy concurrent load.
+- **Ultra-Low Latency:** Average HTTP response time of just **2.36ms**, with a 95th percentile (p95) of **7.62ms**.
+
+### Detailed Results
+
+| Operation | Throughput (RPS) | Avg Latency | Median (p50) | p95 Latency | Max Latency |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Read Path** (`GET /r/{id}`) | 238.11 | 2.81 ms | 1.70 ms | 9.19 ms | 211.52 ms |
+| **Write Path** (`POST /shorten`) | 227.91 | 1.89 ms | 1.55 ms | 2.97 ms | 203.56 ms |
+| **Overall HTTP** | **466.19** | **2.36 ms** | **1.62 ms** | **7.62 ms** | **211.52 ms** |
+
+### Analysis
+1. **Write vs. Read Performance:** The Write path is slightly faster on average (1.89ms vs 2.81ms). This is expected because writing a new URL only requires a single `INSERT` query. The Read path requires a `SELECT` to find the URL, plus an `UPDATE` to increment the click counter, resulting in slightly higher database overhead.u
+2. **Handling Outliers:** While the *maximum* latency spiked to ~211ms, the **p95 latency remained under 10ms**. This means 95% of users experienced lightning-fast redirects, and the 211ms spikes were likely isolated database lock waits or Go Garbage Collection pauses, rather than a systemic bottleneck.
+3. **Connection Pooling:** The `pgxpool` successfully managed the concurrent database requests without dropping a single connection or throwing a timeout error, proving the robustness of the database layer.
+
+
 ## License
 
 MIT

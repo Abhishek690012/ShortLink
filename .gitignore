@@ -1,17 +1,15 @@
-# Environment — never commit secrets
 .env
 
-# Go compiled binaries and test cache
 shortlink
 *.exe
 *.out
 *.test
 /bin/
 
-# Dependency vendor directory (if used)
 vendor/
 
-# IDE / editor artifacts
+results.json
+temp.txt
 .idea/
 .vscode/
 *.swp

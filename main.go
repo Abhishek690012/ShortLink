@@ -23,12 +23,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// -----------------------------------------------------------------------
 // Schema
-// -----------------------------------------------------------------------
-
-// createSchema is the DDL executed once at startup to ensure the urls
-// table exists. Using IF NOT EXISTS makes the operation idempotent.
 const createSchema = `
 CREATE TABLE IF NOT EXISTS urls (
     id         VARCHAR(10)  PRIMARY KEY,
@@ -37,13 +32,9 @@ CREATE TABLE IF NOT EXISTS urls (
     created_at TIMESTAMP    DEFAULT NOW()
 );`
 
-// -----------------------------------------------------------------------
 // Config
-// -----------------------------------------------------------------------
-
-// config holds the database connection parameters.
 type config struct {
-	host     string
+	host     string //dabase connection parameters
 	port     string
 	user     string
 	password string
@@ -80,9 +71,7 @@ func getEnv(key, fallback string) string {
 	return fallback
 }
 
-// -----------------------------------------------------------------------
 // Database
-// -----------------------------------------------------------------------
 
 // connectDB establishes a pgxpool connection pool, pings the server to
 // confirm connectivity, and returns the pool.
@@ -92,7 +81,6 @@ func connectDB(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)
 	}
 
-	// Ping with a short timeout to surface connectivity issues early.
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
@@ -114,59 +102,52 @@ func bootstrapSchema(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// -----------------------------------------------------------------------
-// Main
-// -----------------------------------------------------------------------
-
 const (
 	serverAddr = ":8080"
 	baseURL    = "http://localhost:8080"
 )
 
 func main() {
-	// ── 1. Load .env file ───────────────────────────────────────────────
-	// godotenv.Load is a no-op (not an error) when .env is absent, so the
-	// binary degrades gracefully to OS-level env vars or defaults.
+
 	if err := godotenv.Load(); err != nil {
-		log.Println("⚠  No .env file found — using environment variables / defaults")
+		log.Println("No .env file found — using environment variables / defaults")
 	} else {
-		log.Println("✔  Loaded environment from .env")
+		log.Println("Loaded environment from .env")
 	}
 
 	cfg := loadConfig()
-	log.Printf("→  Connecting to database at %s:%s/%s ...", cfg.host, cfg.port, cfg.dbName)
+	log.Printf("  Connecting to database at %s:%s/%s ...", cfg.host, cfg.port, cfg.dbName)
 
-	// ── 2. Connect to PostgreSQL ─────────────────────────────────────────
+	// Connect to PostgreSQL
 	ctx := context.Background()
 
 	pool, err := connectDB(ctx, cfg.dsn())
 	if err != nil {
-		log.Fatalf("✖  Connection error: %v", err)
+		log.Fatalf("Connection error: %v", err)
 	}
-	defer pool.Close()
+	defer pool.Close() //atomic operation
 
-	log.Println("✔  Connected to PostgreSQL successfully")
+	log.Println("Connected to PostgreSQL successfully")
 
-	// ── 3. Bootstrap the schema ──────────────────────────────────────────
-	log.Println("→  Applying schema migrations ...")
+	// Bootstrap the schema
+	log.Println(" Applying schema migrations ..")
 
 	if err := bootstrapSchema(ctx, pool); err != nil {
-		log.Fatalf("✖  Schema error: %v", err)
+		log.Fatalf("Schema error: %v", err)
 	}
 
-	log.Println("✔  Schema is up to date (table 'urls' ready)")
+	log.Println("Schema is up to date (table 'urls' ready)")
 
-	// ── 4. Register HTTP routes ──────────────────────────────────────────
-	// Go 1.22+ ServeMux supports method-qualified patterns ("METHOD /path").
+	// Register HTTP route
 	h := NewHandler(pool, baseURL)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /shorten",    h.ShortenURL)  // Module 2 — write path
-	mux.HandleFunc("GET /r/{id}",      h.RedirectURL) // Module 3 — read path
-	mux.HandleFunc("GET /stats/{id}",  h.GetStats)    // Module 4 — stats
-	mux.HandleFunc("/", notFound404)                   // catch-all 404
+	mux.HandleFunc("POST /shorten", h.ShortenURL) // Module 2 — write path
+	mux.HandleFunc("GET /r/{id}", h.RedirectURL)  // Module 3 — read path
+	mux.HandleFunc("GET /stats/{id}", h.GetStats) // Module 4 — stats
+	mux.HandleFunc("/", notFound404)              // catch-all 404
 
-	// ── 5. Start HTTP server ─────────────────────────────────────────────
+	// Start HTTP server
 	srv := &http.Server{
 		Addr:         serverAddr,
 		Handler:      mux,
@@ -175,12 +156,12 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	log.Printf("🚀  ShortLink listening on %s", baseURL)
-	log.Printf("    POST %s/shorten", baseURL)
-	log.Printf("    GET  %s/r/{id}", baseURL)
-	log.Printf("    GET  %s/stats/{id}", baseURL)
+	log.Printf(" ShortLink listening on %s", baseURL)
+	log.Printf("POST %s/shorten", baseURL)
+	log.Printf(" GET  %s/r/{id}", baseURL)
+	log.Printf("GET  %s/stats/{id}", baseURL)
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("✖  Server error: %v", err)
+		log.Fatalf("Server error: %v", err)
 	}
 }
