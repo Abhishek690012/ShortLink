@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -38,13 +39,22 @@ func generateShortID(length int) string {
 // Handler groups all HTTP handlers and their shared dependencies so they
 // can be registered onto a ServeMux cleanly.
 type Handler struct {
-	pool    *pgxpool.Pool
-	baseURL string
+	pool      *pgxpool.Pool
+	rdb       *redis.Client
+	cacheTTL  time.Duration
+	clickChan chan<- string
+	baseURL   string
 }
 
-// NewHandler constructs a Handler with the given pool and base URL.
-func NewHandler(pool *pgxpool.Pool, baseURL string) *Handler {
-	return &Handler{pool: pool, baseURL: baseURL}
+// NewHandler constructs a Handler with the given pool, redis client, cache TTL, click channel, and base URL.
+func NewHandler(pool *pgxpool.Pool, rdb *redis.Client, cacheTTL time.Duration, clickChan chan<- string, baseURL string) *Handler {
+	return &Handler{
+		pool:      pool,
+		rdb:       rdb,
+		cacheTTL:  cacheTTL,
+		clickChan: clickChan,
+		baseURL:   baseURL,
+	}
 }
 
 type shortenRequest struct {
@@ -138,9 +148,30 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	//  Look up the long URL
 	var longURL string
+	var cacheHit bool
 
+	// Check cache
+	if h.rdb != nil {
+		val, err := h.rdb.Get(ctx, "shortlink:url:"+id).Result()
+		if err == nil {
+			longURL = val
+			cacheHit = true
+		} else if err != redis.Nil {
+			// Log error but continue (graceful degradation)
+			log.Printf("WARNING: Redis cache lookup error for id %q: %v", id, err)
+		}
+	}
+
+	if cacheHit {
+		log.Printf("⚡ Cache Hit  /r/%s  →  %s", id, longURL)
+		// Queue click tracking asynchronously
+		h.clickChan <- id
+		http.Redirect(w, r, longURL, http.StatusFound)
+		return
+	}
+
+	// Cache Miss / Fallback to PostgreSQL
 	err := h.pool.QueryRow(ctx,
 		`SELECT long_url FROM urls WHERE id = $1`, id,
 	).Scan(&longURL)
@@ -160,19 +191,19 @@ func (h *Handler) RedirectURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// atomic increment in the click counter
-	_, err = h.pool.Exec(ctx,
-		`UPDATE urls SET clicks = clicks + 1 WHERE id = $1`, id,
-	)
-	if err != nil {
-		// Log the error but without aborting the redirect
-		log.Printf("ERROR incrementing clicks for id %q: %v", id, err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "database error updating click count",
-		})
+	// Queue click tracking asynchronously
+	h.clickChan <- id
+
+	// Write back to Cache (graceful degradation)
+	if h.rdb != nil {
+		if err := h.rdb.Set(ctx, "shortlink:url:"+id, longURL, h.cacheTTL).Err(); err != nil {
+			log.Printf("WARNING: Redis cache write error for id %q: %v", id, err)
+		} else {
+			log.Printf("✔ Cached  /r/%s  →  %s  (TTL: %s)", id, longURL, h.cacheTTL)
+		}
 	}
 
-	log.Printf("→  Redirecting  /r/%s  →  %s  (click recorded)", id, longURL)
+	log.Printf("→  Redirecting  /r/%s  →  %s  (click queued)", id, longURL)
 
 	http.Redirect(w, r, longURL, http.StatusFound)
 }

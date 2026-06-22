@@ -223,12 +223,36 @@ k6 run benchmark.js
 
 ## Benchmark results
 
-### Highlights
+### Caching Upgrade Comparison (Redis vs. Postgres Only)
+
+We recently introduced a Redis cache to optimize the read/redirect path. The results below compare the system's performance with and without the Redis cache.
+
+| Configuration | With Redis (Cached) | Without Redis (Postgres Only) |
+| :--- | :--- | :--- |
+| **Read Redirection (N)** | 74,441 requests | 28,316 requests |
+| **Read Latency (Avg)** | **466.87 µs** | 166.36 ms |
+| **Read Latency (Median)** | **378.62 µs** | 164.03 ms |
+| **Read Latency (p95)** | **924.23 µs** | 214.15 ms |
+| **Write Latency (Avg)** | 2.04 ms | 2.03 ms |
+| **Overall System RPS** | **479.47/s** | 285.81/s |
+| **Error Rate** | 0.00% | 0.00% |
+
+### Analysis
+1. **Sub-millisecond Reads:** The Redis cache drastically reduced read latency. Average read latency dropped from ~166ms to **~466µs** (a ~350x improvement), and p95 latency fell from ~214ms to under 1ms.
+2. **Higher Throughput:** Overall system throughput increased from ~285 RPS to **~479 RPS** (+68%), handling significantly more read requests (74k vs 28k) in the same timeframe.
+3. **Consistent Write Performance:** As expected, write latency remained consistent (~2ms) across both configurations, as writes still go directly to PostgreSQL.
+4. **Zero Errors:** Both configurations maintained a perfect 0.00% error rate, demonstrating the stability of the application under load.
+
+---
+
+### Previous Baseline Results (PostgreSQL Only)
+
+#### Highlights
 - **Zero Downtime:** Achieved a **0.00% error rate** across ~138,800 total requests.
 - **High Throughput:** Sustained **~466 Requests Per Second (RPS)** under heavy concurrent load.
 - **Ultra-Low Latency:** Average HTTP response time of just **2.36ms**, with a 95th percentile (p95) of **7.62ms**.
 
-### Detailed Results
+#### Detailed Results
 
 | Operation | Throughput (RPS) | Avg Latency | Median (p50) | p95 Latency | Max Latency |
 | :--- | :---: | :---: | :---: | :---: | :---: |
@@ -236,8 +260,8 @@ k6 run benchmark.js
 | **Write Path** (`POST /shorten`) | 227.91 | 1.89 ms | 1.55 ms | 2.97 ms | 203.56 ms |
 | **Overall HTTP** | **466.19** | **2.36 ms** | **1.62 ms** | **7.62 ms** | **211.52 ms** |
 
-### Analysis
-1. **Write vs. Read Performance:** The Write path is slightly faster on average (1.89ms vs 2.81ms). This is expected because writing a new URL only requires a single `INSERT` query. The Read path requires a `SELECT` to find the URL, plus an `UPDATE` to increment the click counter, resulting in slightly higher database overhead.u
+#### Baseline Analysis
+1. **Write vs. Read Performance:** The Write path is slightly faster on average (1.89ms vs 2.81ms). This is expected because writing a new URL only requires a single `INSERT` query. The Read path requires a `SELECT` to find the URL, plus an `UPDATE` to increment the click counter, resulting in slightly higher database overhead.
 2. **Handling Outliers:** While the *maximum* latency spiked to ~211ms, the **p95 latency remained under 10ms**. This means 95% of users experienced lightning-fast redirects, and the 211ms spikes were likely isolated database lock waits or Go Garbage Collection pauses, rather than a systemic bottleneck.
 3. **Connection Pooling:** The `pgxpool` successfully managed the concurrent database requests without dropping a single connection or throwing a timeout error, proving the robustness of the database layer.
 

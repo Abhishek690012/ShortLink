@@ -1,7 +1,7 @@
 # System-level dependencies for building, running and load testing ShortLink.
 # These represent the binaries and services required to run this project.
-
-go>=1.22
+#These should not be installed via pip. These should be present as system dependencies.
 k6>=0.47.0
 postgresql>=15
+redis>=7
 docker-compose>=2.0
