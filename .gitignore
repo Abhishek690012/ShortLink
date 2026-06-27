@@ -8,6 +8,8 @@ shortlink
 
 vendor/
 
+analysis_results.md
+technical_analysis_report.md
 results.json
 temp.txt
 .idea/
